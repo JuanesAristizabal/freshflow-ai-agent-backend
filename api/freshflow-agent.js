@@ -133,7 +133,9 @@ const FRESHFLOW_CONTEXT = {
 };
 
 function setCorsHeaders(req, res) {
-  const allowedOrigin = process.env.FRONTEND_ORIGIN || "https://juanesaristizabal.github.io";
+  const allowedOrigin =
+    process.env.FRONTEND_ORIGIN || "https://juanesaristizabal.github.io";
+
   const requestOrigin = req.headers.origin;
 
   if (requestOrigin && requestOrigin.startsWith(allowedOrigin)) {
@@ -207,11 +209,12 @@ Return ONLY valid JSON using this structure:
 `;
 }
 
-function fallbackResponse(message) {
+function fallbackResponse() {
   return {
     intent: "general",
     role: "Operations",
-    diagnosis: "FreshFlow AI detected a grocery supply chain question, but the AI service response could not be parsed.",
+    diagnosis:
+      "FreshFlow AI detected a grocery supply chain question, but the AI service response could not be parsed.",
     rootCauses: [
       "The backend received the request successfully",
       "Gemini returned a response that was not valid JSON",
@@ -236,7 +239,7 @@ function fallbackResponse(message) {
   };
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   setCorsHeaders(req, res);
 
   if (req.method === "OPTIONS") {
@@ -312,13 +315,15 @@ module.exports = async function handler(req, res) {
     }
 
     const text =
-      geminiPayload?.candidates?.[0]?.content?.parts?.map((part) => part.text).join("") || "";
+      geminiPayload?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text)
+        .join("") || "";
 
     const parsed = safeJsonParse(text);
 
     if (!parsed) {
       return res.status(200).json({
-        ...fallbackResponse(message),
+        ...fallbackResponse(),
         rawGeminiText: text
       });
     }
@@ -335,4 +340,4 @@ module.exports = async function handler(req, res) {
       message: error.message
     });
   }
-};
+}
