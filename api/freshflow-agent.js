@@ -1,116 +1,26 @@
+import { FRESHFLOW_DB, retrieveFreshflowContext } from "../data/freshflow-db.js";
+
 const DEFAULT_MODEL = "gemini-2.5-flash";
 
 const FRESHFLOW_CONTEXT = {
   platform: "Walmart FreshFlow AI",
   purpose:
     "University prototype of an internal grocery supply chain AI platform designed to reduce grocery losses, protect margins, monitor supply chain risks, and support C-Level and Operations decisions.",
-  productsAtRisk: [
-    {
-      sku: "1029",
-      product: "Strawberries",
-      category: "Produce",
-      region: "Texas",
-      shelfLife: "36h",
-      wasteRisk: "92%",
-      demandForecast: "-14%",
-      weatherImpact: "High",
-      recommendation:
-        "Apply 15% markdown and transfer excess inventory to 22 nearby stores",
-      expectedSavings: "$4.9M",
-      confidence: "96%",
-      owner: "Store Operations"
-    },
-    {
-      sku: "4102",
-      product: "Milk",
-      category: "Dairy",
-      region: "Dallas Metro",
-      shelfLife: "2 days",
-      wasteRisk: "87%",
-      demandForecast: "-8%",
-      weatherImpact: "Medium",
-      recommendation: "Transfer inventory from Store #118 to Store #210",
-      expectedSavings: "$7.2M",
-      confidence: "93%",
-      owner: "Store Operations"
-    },
-    {
-      sku: "9150",
-      product: "Salmon Fillets",
-      category: "Seafood",
-      region: "Northeast Urban",
-      shelfLife: "24h",
-      wasteRisk: "91%",
-      demandForecast: "-11%",
-      weatherImpact: "Low",
-      recommendation: "Reduce price 10% and prioritize same-day movement",
-      expectedSavings: "$6.2M",
-      confidence: "94%",
-      owner: "Category Management"
-    }
+  dataSources: [
+    "POS sales",
+    "Store inventory",
+    "Expiration dates",
+    "Supplier OTIF",
+    "Distribution center capacity",
+    "Truck GPS",
+    "Cold chain temperature",
+    "Weather",
+    "Local events",
+    "Traffic",
+    "Commodity prices",
+    "FreshFlow simulated database"
   ],
-  suppliers: [
-    {
-      supplier: "Green Valley",
-      category: "Produce",
-      otif: "84%",
-      quality: "88%",
-      leadTime: "3.6 days",
-      delayRisk: "High",
-      wasteImpact: "$2.8M",
-      reason: "Recurring OTIF deterioration over the last 3 weeks",
-      recommendation: "Activate backup supplier and split the next purchase order"
-    },
-    {
-      supplier: "DairyBest",
-      category: "Dairy",
-      otif: "97%",
-      quality: "96%",
-      leadTime: "1.8 days",
-      delayRisk: "Low",
-      wasteImpact: "$420K",
-      reason: "Stable cold-chain compliance",
-      recommendation: "Keep as primary supplier"
-    },
-    {
-      supplier: "Blue Coast Seafood",
-      category: "Seafood",
-      otif: "86%",
-      quality: "89%",
-      leadTime: "3.2 days",
-      delayRisk: "High",
-      wasteImpact: "$1.9M",
-      reason: "Temperature compliance variance",
-      recommendation:
-        "Request quality inspection and monitor cold-chain compliance"
-    }
-  ],
-  alerts: [
-    {
-      type: "Cold chain interruption",
-      asset: "Truck #284",
-      category: "Dairy",
-      temperature: "7.8°C",
-      duration: "18 minutes",
-      severity: "High",
-      recommendation: "Reroute and inspect cold-chain integrity"
-    },
-    {
-      type: "Supplier delay",
-      asset: "Green Valley Produce",
-      location: "DC Atlanta",
-      etaDelay: "+18h",
-      severity: "Medium",
-      recommendation: "Activate backup supplier"
-    },
-    {
-      type: "Produce overstock",
-      asset: "Texas Region",
-      category: "Avocados and strawberries",
-      severity: "Medium",
-      recommendation: "Apply markdowns and transfer excess inventory"
-    }
-  ],
+  databaseTables: Object.keys(FRESHFLOW_DB),
   executiveSummary:
     "This week, FreshFlow AI identified the strongest risk concentration in the South region, mainly across produce categories. The largest value opportunity came from dynamic markdown recommendations and inventory transfers. Supplier risk remains manageable, but Green Valley Produce should be monitored due to repeated delivery delays."
 };
@@ -124,6 +34,7 @@ const RESPONSE_SCHEMA = {
         "waste_risk",
         "supplier_risk",
         "cold_chain",
+        "logistics_risk",
         "scenario_simulation",
         "executive_summary",
         "report_generation",
@@ -247,23 +158,30 @@ function safeJsonParse(text) {
   }
 }
 
-function buildPrompt({ message, role, currentPage }) {
+function buildPrompt({ message, role, currentPage, retrievedContext }) {
   return `
 You are FreshFlow AI Agent, an internal Walmart grocery supply chain copilot for a university prototype.
 
 This is NOT real Walmart internal data. It is simulated data for an academic prototype.
 
 Your job:
-- Help executives understand grocery loss, margin impact, ROI, supplier risk and sustainability.
-- Help operations teams understand store actions, product-level risks, supplier delays, cold-chain alerts, markdowns, transfers and replenishment.
+- Help executives understand grocery loss, margin impact, ROI, supplier risk, logistics risk and sustainability.
+- Help operations teams understand store actions, product-level risks, supplier delays, cold-chain alerts, markdowns, transfers, replenishment and execution.
 - Stay only within grocery supply chain, waste reduction, inventory, suppliers, logistics, cold chain, forecasting, sustainability and executive reporting.
 - Every operational action must require human approval.
+- Use the retrieved database records as the primary source of truth for the answer.
+- If the user asks about Truck #284, logistics, route, cold chain or temperature, prioritize the logistics records.
+- If the user asks about Green Valley or supplier risk, prioritize supplier records.
+- If the user asks about strawberries, avocados, produce, Texas or waste, prioritize product and region records.
 
 Current user role: ${role || "Executive"}
 Current dashboard page: ${currentPage || "ai"}
 
-Simulated platform context:
+General simulated platform context:
 ${JSON.stringify(FRESHFLOW_CONTEXT, null, 2)}
+
+Relevant database records retrieved for this question:
+${JSON.stringify(retrievedContext, null, 2)}
 
 User question:
 ${message}
@@ -278,7 +196,49 @@ Do not include explanations outside the JSON object.
 function fallbackResponse(message) {
   const lower = String(message || "").toLowerCase();
 
-  if (lower.includes("texas") || lower.includes("produce") || lower.includes("strawberr")) {
+  if (
+    lower.includes("truck") ||
+    lower.includes("logistics") ||
+    lower.includes("cold chain") ||
+    lower.includes("temperature") ||
+    lower.includes("284")
+  ) {
+    return {
+      intent: "logistics_risk",
+      role: "Operations",
+      diagnosis:
+        "Truck #284 shows a high logistics risk due to a cold-chain deviation and route delay.",
+      rootCauses: [
+        "Truck #284 is carrying dairy inventory with temperature above threshold.",
+        "The shipment reached 7.8°C while the threshold is 4°C.",
+        "The route also shows a 32-minute ETA delay, increasing spoilage exposure."
+      ],
+      recommendedAction:
+        "Reroute Truck #284, inspect cold-chain integrity at arrival and prioritize the receiving dock.",
+      expectedSavings: "$1.1M",
+      confidence: "95%",
+      owner: "Logistics",
+      approvalRequired: true,
+      businessImpact:
+        "Acting now reduces the probability of dairy spoilage, protects margin and prevents store-level inventory disruption.",
+      nextSteps: [
+        "Approve reroute recommendation.",
+        "Notify DC receiving team.",
+        "Inspect dairy shipment temperature on arrival."
+      ],
+      dashboardTarget: "operations",
+      shortAnswer:
+        "Truck #284 has a cold-chain deviation and route delay. FreshFlow AI recommends rerouting and inspection."
+    };
+  }
+
+  if (
+    lower.includes("texas") ||
+    lower.includes("produce") ||
+    lower.includes("strawberry") ||
+    lower.includes("strawberries") ||
+    lower.includes("waste")
+  ) {
     return {
       intent: "waste_risk",
       role: "Executive",
@@ -286,11 +246,11 @@ function fallbackResponse(message) {
         "Produce waste risk is increasing in Texas, especially for strawberries and avocados.",
       rootCauses: [
         "Shelf life pressure is high for strawberries with only 36 hours remaining.",
-        "Demand is 14% below forecast across the Texas fresh cluster.",
+        "Demand is below forecast across the Texas fresh cluster.",
         "Heat conditions are reducing effective shelf life and increasing spoilage probability."
       ],
       recommendedAction:
-        "Apply a 15% markdown today, transfer excess inventory to 22 nearby high-demand stores, and reduce tomorrow’s sensitive produce replenishment.",
+        "Apply a 15% markdown today, transfer excess inventory to 22 nearby high-demand stores and reduce tomorrow’s sensitive produce replenishment.",
       expectedSavings: "$4.9M",
       confidence: "96%",
       owner: "Store Operations",
@@ -333,7 +293,7 @@ function fallbackResponse(message) {
     ],
     dashboardTarget: "operations",
     shortAnswer:
-      "I can help with grocery waste, supplier risk, cold chain alerts, inventory and executive reporting."
+      "I can help with grocery waste, supplier risk, cold chain alerts, inventory, logistics and executive reporting."
   };
 }
 
@@ -359,7 +319,7 @@ function normalizeResponse(parsed, message) {
     dashboardTarget: parsed.dashboardTarget || fallback.dashboardTarget,
     shortAnswer: parsed.shortAnswer || fallback.shortAnswer,
     simulatedDataNotice:
-      "This response uses simulated project data for the Walmart FreshFlow AI university prototype."
+      "This response uses simulated project data from the FreshFlow database for the Walmart FreshFlow AI university prototype."
   };
 }
 
@@ -394,10 +354,13 @@ export default async function handler(req, res) {
       });
     }
 
+    const retrievedContext = retrieveFreshflowContext(message);
+
     const prompt = buildPrompt({
       message,
       role,
-      currentPage
+      currentPage,
+      retrievedContext
     });
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
