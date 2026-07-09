@@ -1,0 +1,13 @@
+{
+  "name": "freshflow-ai-agent-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless backend for Walmart FreshFlow AI Agent using Gemini API.",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
